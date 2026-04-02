@@ -174,7 +174,7 @@ export default function App() {
     setIsExtracting(true);
     setError("");
     try {
-      console.log("[Fill Form] Sending transcript to http://localhost:3001/extract");
+      console.log("[Fill Form] extractData (production uses /api/voice)");
       const extracted = await extractData(transcript);
       console.log("[Fill Form] Received extract response:", extracted);
       setFormData((prev) => ({

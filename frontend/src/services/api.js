@@ -14,8 +14,67 @@ async function request(path, body) {
   return data;
 }
 
-export function extractData(transcript) {
-  return request("/extract", { transcript });
+/**
+ * Transcript → structured fields for "Fill form from transcript".
+ * Production (Vercel): POST /api/voice → { success, data }.
+ * Development: POST /extract on local Express (same shape without wrapper).
+ */
+export async function extractData(transcript) {
+  const base = import.meta.env.VITE_API_BASE_URL
+    ? String(import.meta.env.VITE_API_BASE_URL).replace(/\/$/, "")
+    : "http://localhost:3001";
+
+  const url = import.meta.env.PROD ? "/api/voice" : `${base}/extract`;
+
+  console.log("[extractData] POST", url);
+
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transcript }),
+    });
+  } catch (networkErr) {
+    console.error("[extractData] Network error:", networkErr);
+    throw new Error("Could not reach the transcript service.");
+  }
+
+  const rawText = await response.text();
+  let payload;
+  try {
+    payload = rawText ? JSON.parse(rawText) : {};
+  } catch (parseErr) {
+    console.error("[extractData] Non-JSON body (first 300 chars):", rawText?.slice(0, 300));
+    throw new Error("Transcript service returned an invalid response.");
+  }
+
+  if (!response.ok) {
+    console.error("[extractData] HTTP", response.status, payload);
+    throw new Error(payload?.error || payload?.detail || `Extract failed (${response.status}).`);
+  }
+
+  if (payload.success === true && payload.data && typeof payload.data === "object") {
+    const d = payload.data;
+    console.log("[extractData] Vercel OK, keys:", Object.keys(d).join(", "));
+    return {
+      clientDetails: d.clientDetails,
+      financials: d.financials,
+      needs: d.needs,
+    };
+  }
+
+  if (payload.success === false) {
+    throw new Error(payload.error || "Extract failed.");
+  }
+
+  if (payload.clientDetails && payload.financials && payload.needs) {
+    console.log("[extractData] Legacy Express shape OK");
+    return payload;
+  }
+
+  console.error("[extractData] Unexpected payload:", payload);
+  throw new Error("Unexpected response from transcript service.");
 }
 
 export function generateRoa(structuredData, refinementHint) {
