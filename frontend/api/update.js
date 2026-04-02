@@ -1,12 +1,10 @@
 /**
  * Vercel Serverless Function — POST /api/update
  * Voice-driven form patches. Returns { success, message, updates }.
+ * Every response is JSON (same pattern as /api/voice) so the client never gets HTML.
  *
- * Env (optional, for real AI merges):
+ * Env (optional):
  *   ANTHROPIC_API_KEY — if set, calls Anthropic to produce JSON patch from transcript + formData.
- *
- * Future OpenAI: add openaiVoicePatch() using OPENAI_API_KEY + Responses API,
- * then pick provider: process.env.AI_PROVIDER === "openai" ? openaiVoicePatch(...) : anthropicVoicePatch(...)
  */
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -31,6 +29,29 @@ Output shape (only include keys you are updating):
   "disclosures": {},
   "fica": {}
 }`;
+
+function sendJson(res, status, obj) {
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.status(status).end(JSON.stringify(obj));
+}
+
+function parseBody(req) {
+  const b = req.body;
+  if (b == null) return {};
+  if (typeof b === "string") {
+    try {
+      const parsed = JSON.parse(b);
+      return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  if (typeof b === "object" && !Array.isArray(b)) return b;
+  return {};
+}
 
 function parseJsonPatch(text) {
   if (!text || typeof text !== "string") return {};
@@ -90,25 +111,27 @@ Return ONLY updated JSON partial object for changed sections. No explanation.`;
   return parseJsonPatch(raw);
 }
 
-module.exports = async (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+async function handler(req, res) {
+  console.log("[api/update] method:", req.method);
 
   if (req.method === "OPTIONS") {
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     return res.status(204).end();
   }
 
   if (req.method !== "POST") {
-    return res.status(405).json({ success: false, error: "Method not allowed" });
+    return sendJson(res, 405, { success: false, error: "Method not allowed" });
   }
 
   try {
-    const body = req.body || {};
+    const body = parseBody(req);
     const { transcript, formData } = body;
 
     if (!transcript || !String(transcript).trim()) {
-      return res.status(400).json({
+      return sendJson(res, 400, {
         success: false,
         error: "transcript is required",
         message: "Missing transcript",
@@ -116,7 +139,7 @@ module.exports = async (req, res) => {
     }
 
     if (!formData || typeof formData !== "object" || Array.isArray(formData)) {
-      return res.status(400).json({
+      return sendJson(res, 400, {
         success: false,
         error: "formData is required",
         message: "Missing form data",
@@ -133,17 +156,23 @@ module.exports = async (req, res) => {
 
     console.log("[api/update] OK, keys in updates:", Object.keys(updates).join(", ") || "(none)");
 
-    return res.status(200).json({
+    return sendJson(res, 200, {
       success: true,
       message: "Form updated successfully",
       updates,
     });
   } catch (err) {
     console.error("[api/update] Unhandled error:", err);
-    return res.status(500).json({
+    return sendJson(res, 500, {
       success: false,
       error: err?.message || "Server error",
       message: "Voice update could not be completed",
     });
   }
-};
+}
+
+/** @see https://vercel.com/docs/functions/configuring-functions/duration */
+export const config = { maxDuration: 60 };
+
+/** ESM default export: frontend/package.json has "type": "module". */
+export default handler;

@@ -143,13 +143,26 @@ export async function voiceUpdate(transcript, formData) {
     throw new Error("Could not reach the voice update service. Check your connection.");
   }
 
+  const text = await response.text();
+  const trimmed = text.trim();
   let data;
   try {
-    const text = await response.text();
-    data = text ? JSON.parse(text) : {};
+    data = trimmed ? JSON.parse(trimmed) : {};
   } catch (parseErr) {
-    console.error("API ERROR: invalid JSON from voice update", parseErr);
-    throw new Error("Voice update returned an invalid response.");
+    const ct = response.headers.get("content-type") || "";
+    const preview = trimmed.replace(/\s+/g, " ").slice(0, 200);
+    console.error("API ERROR: invalid JSON from voice update", {
+      status: response.status,
+      contentType: ct,
+      preview,
+      hint:
+        "Production often means /api/update was not deployed (check Vercel Root Directory: repo root uses /api, \"frontend\" uses frontend/api) or the edge returned HTML (404/504).",
+      parseErr,
+    });
+    throw new Error(
+      `Voice update returned a non-JSON response (HTTP ${response.status}). ` +
+        (preview ? `Body starts with: ${preview}` : "Empty body.")
+    );
   }
 
   if (!response.ok) {

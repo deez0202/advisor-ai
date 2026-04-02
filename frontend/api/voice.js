@@ -1,6 +1,9 @@
 /**
  * Vercel Serverless — POST /api/voice
  * "Fill form from transcript" — always returns valid JSON (never HTML).
+ *
+ * ESM default export: frontend/package.json has "type": "module", so CommonJS
+ * module.exports here would not load correctly on Vercel.
  */
 
 function sendJson(res, status, obj) {
@@ -18,7 +21,7 @@ function parseBody(req) {
   return {};
 }
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   console.log("[api/voice] method:", req.method);
 
   if (req.method === "OPTIONS") {
@@ -46,7 +49,6 @@ module.exports = async (req, res) => {
 
     const t = String(transcript).trim();
 
-    // Test / stub response — swap for real extraction (Anthropic/OpenAI) later
     return sendJson(res, 200, {
       success: true,
       data: {
@@ -61,4 +63,4 @@ module.exports = async (req, res) => {
       error: err?.message || "Internal error",
     });
   }
-};
+}
