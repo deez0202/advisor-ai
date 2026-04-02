@@ -14,66 +14,79 @@ async function request(path, body) {
   return data;
 }
 
+const MISSING = {
+  clientDetails: { name: "MISSING", idNumber: "MISSING", contact: "MISSING", email: "MISSING" },
+  financials: { income: "MISSING", expenses: "MISSING" },
+  needs: { goal: "MISSING", riskProfile: "MISSING" },
+};
+
 /**
  * Transcript → structured fields for "Fill form from transcript".
- * Production (Vercel): POST /api/voice → { success, data }.
- * Development: POST /extract on local Express (same shape without wrapper).
+ * Uses Vercel serverless POST /api/voice only (no Express server.js in production).
+ * Local dev: run `vercel dev` (API on :3000) and Vite proxies /api → see vite.config.js.
  */
 export async function extractData(transcript) {
-  const base = import.meta.env.VITE_API_BASE_URL
-    ? String(import.meta.env.VITE_API_BASE_URL).replace(/\/$/, "")
-    : "http://localhost:3001";
-
-  const url = import.meta.env.PROD ? "/api/voice" : `${base}/extract`;
-
-  console.log("[extractData] POST", url);
-
-  let response;
+  let res;
   try {
-    response = await fetch(url, {
+    res = await fetch("/api/voice", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ transcript }),
     });
   } catch (networkErr) {
-    console.error("[extractData] Network error:", networkErr);
-    throw new Error("Could not reach the transcript service.");
+    console.error("API ERROR: network", networkErr);
+    throw new Error("Could not reach /api/voice. Is the Vercel function deployed?");
   }
 
-  const rawText = await response.text();
-  let payload;
+  let data;
   try {
-    payload = rawText ? JSON.parse(rawText) : {};
+    const text = await res.text();
+    data = text ? JSON.parse(text) : {};
   } catch (parseErr) {
-    console.error("[extractData] Non-JSON body (first 300 chars):", rawText?.slice(0, 300));
+    console.error("API ERROR: invalid JSON from /api/voice", parseErr);
     throw new Error("Transcript service returned an invalid response.");
   }
 
-  if (!response.ok) {
-    console.error("[extractData] HTTP", response.status, payload);
-    throw new Error(payload?.error || payload?.detail || `Extract failed (${response.status}).`);
+  if (data.success === false) {
+    console.error("API ERROR:", data?.error || data);
+    throw new Error(data?.error || "Transcript request failed.");
   }
 
-  if (payload.success === true && payload.data && typeof payload.data === "object") {
-    const d = payload.data;
-    console.log("[extractData] Vercel OK, keys:", Object.keys(d).join(", "));
+  // Legacy Express /extract (no success flag): top-level clientDetails / financials / needs
+  if (data.clientDetails && data.financials && data.needs && data.success === undefined) {
+    console.log("[extractData] legacy Express shape");
     return {
-      clientDetails: d.clientDetails,
-      financials: d.financials,
-      needs: d.needs,
+      clientDetails: data.clientDetails,
+      financials: data.financials,
+      needs: data.needs,
     };
   }
 
-  if (payload.success === false) {
-    throw new Error(payload.error || "Extract failed.");
+  if (data.success !== true) {
+    console.error("API ERROR: unexpected success flag", data);
+    throw new Error(data?.error || "Transcript request failed.");
   }
 
-  if (payload.clientDetails && payload.financials && payload.needs) {
-    console.log("[extractData] Legacy Express shape OK");
-    return payload;
+  const inner = data.data;
+  if (!inner || typeof inner !== "object") {
+    console.error("API ERROR: missing data object", data);
+    throw new Error("Invalid response: missing data.");
   }
 
-  console.error("[extractData] Unexpected payload:", payload);
+  if (inner.extracted === "Test successful" && !inner.clientDetails) {
+    console.log("[extractData] test payload OK, transcript length:", inner.transcript?.length ?? 0);
+    return { ...MISSING };
+  }
+
+  if (inner.clientDetails && inner.financials && inner.needs) {
+    return {
+      clientDetails: inner.clientDetails,
+      financials: inner.financials,
+      needs: inner.needs,
+    };
+  }
+
+  console.error("API ERROR: unexpected shape", data);
   throw new Error("Unexpected response from transcript service.");
 }
 
@@ -135,19 +148,19 @@ export async function voiceUpdate(transcript, formData) {
     const text = await response.text();
     data = text ? JSON.parse(text) : {};
   } catch (parseErr) {
-    console.error("[voiceUpdate] Invalid JSON body:", parseErr);
+    console.error("API ERROR: invalid JSON from voice update", parseErr);
     throw new Error("Voice update returned an invalid response.");
   }
 
   if (!response.ok) {
-    console.error("[voiceUpdate] HTTP", response.status, data);
+    console.error("API ERROR: voice update HTTP", response.status, data);
     throw new Error(data?.error || data?.message || `Voice update failed (${response.status}).`);
   }
 
   // Vercel API shape: { success, message, updates }
   if (data && typeof data.success === "boolean") {
     if (!data.success) {
-      console.error("[voiceUpdate] success=false", data);
+      console.error("API ERROR: voice update success=false", data);
       throw new Error(data?.error || data?.message || "Voice update was not successful.");
     }
     const patch = data.updates && typeof data.updates === "object" && !Array.isArray(data.updates) ? data.updates : {};

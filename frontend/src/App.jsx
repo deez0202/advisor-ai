@@ -203,7 +203,7 @@ export default function App() {
         },
       }));
     } catch (requestError) {
-      console.error("[Fill Form] Extract failed:", requestError);
+      console.error("API ERROR:", requestError);
       alert("Failed to extract structured data.");
       setError(requestError.message || "Failed to extract structured data.");
     } finally {
