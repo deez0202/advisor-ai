@@ -220,15 +220,12 @@ export default function App() {
     setIsVoiceUpdating(true);
     setError("");
     try {
-      console.log("[Voice Update] Sending transcript + formData to /voice-update");
-      const data = await voiceUpdate(text, formData);
-      console.log("VOICE RESPONSE:", data);
-      console.log("[Voice Update] Response:", data);
-      setFormData((prev) => deepMergeForm(prev, data));
+      console.log("[Voice Update] Applying spoken text, length:", text.length);
+      const patch = await voiceUpdate(text, formData);
+      setFormData((prev) => deepMergeForm(prev, patch));
       setTranscript((t) => (t ? `${t}\n\n[Voice]: ${text}` : `[Voice]: ${text}`));
     } catch (requestError) {
       console.error("[Voice Update] failed:", requestError);
-      alert("Voice form update failed. Please try again.");
       setError(requestError.message || "Voice update failed.");
     } finally {
       setIsVoiceUpdating(false);
